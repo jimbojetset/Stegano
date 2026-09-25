@@ -1,19 +1,19 @@
 # Stegano
 
-A .NET console app that hides a file inside an image using the low bits of its RGB pixels. Native file dialogs handle file selection and save locations.
+Stegano hides a file in the low bits of an image's RGB pixels. It runs in a console and uses desktop dialogs to open and save files.
 
-Embedding produces two files: a PNG image and a separate extraction file. Keep both to recover the hidden file. If you use a password, you will also need that password.
+Embedding creates a PNG and a separate extraction file. You need both to recover the hidden file, along with the password if you used one.
 
 ## Requirements
 
 - .NET 10 SDK
 - A desktop session on Windows, macOS, or Linux
 - Windows: Windows PowerShell
-- Linux: `zenity` installed
+- Linux: `zenity`
 
 ## Build and run
 
-Run these commands from the project directory:
+From the project directory:
 
 ```sh
 dotnet build
@@ -21,30 +21,36 @@ dotnet run -- embed
 dotnet run -- extract
 ```
 
-Use `dotnet run` for an interactive choice, or `dotnet run -- --help` for help.
+Run `dotnet run` to choose an operation interactively, or `dotnet run -- --help` for help.
 
 ## Hide a file
 
-1. Run `dotnet run -- embed`.
-2. Choose the source image and the file to hide.
-3. Enter an optional password and choose a stealth setting.
-4. Choose where to save the PNG and the separate extraction file.
+1. Choose the source image.
+2. Choose a stealth setting. The console shows the maximum file size in bytes.
+3. Choose the file to hide. If it is too large, the app asks you to choose another.
+4. Enter a password, or press Enter to leave the contents unencrypted. Confirm the password if you entered one.
+5. Choose separate destinations for the PNG and extraction file.
 
-The source image must be fully opaque and decode to 8-bit RGBA or BGRA pixels. The app reports the available file capacity before embedding. The source files are left unchanged.
+The source image must be fully opaque and decode to 8-bit RGBA or BGRA pixels. The filename, including its extension, must fit in 255 UTF-8 bytes. The capacity shown always reserves those 255 bytes, even for a shorter filename.
 
 ## Recover a file
 
-1. Run `dotnet run -- extract`.
-2. Choose the embedded image and its extraction file.
-3. Enter the password used during embedding, or press Enter if none was used.
-4. Choose where to save the recovered file.
+1. Choose the embedded image and its extraction file.
+2. Enter the original password, or press Enter if none was used.
+3. Choose where to save the recovered file.
 
-Cancel any file dialog to stop the operation.
+Cancel any file dialog to stop. No output is written until all destination dialogs have been accepted.
 
-## Stealth and verification
+## Stealth settings
 
-`maximum` is the default. `medium` and `minimum` allow progressively more pixels; `none` uses all pixels. Enabled stealth skips nearly uniform areas and image borders. Extraction reads the setting automatically from the extraction file.
+`maximum` is the default. It skips image borders and areas where a pixel and its four neighbours have nearly the same colour. `medium` and `minimum` accept progressively smaller colour differences. `none` uses all pixels.
 
-Password-protected payloads use AES-GCM authentication. Unencrypted payloads use a SHA-256 checksum to detect corruption. Neither the image nor the extraction file stores the password or encryption key.
+Extraction reads the setting from the extraction file. You do not have to remember it.
 
-Keep the output PNG unchanged. Resizing, image editing, or conversion to JPEG can destroy the hidden data. Stealth reduces changes in smooth areas; it does not guarantee resistance to statistical detection.
+## Encryption and image handling
+
+Password-protected files use AES-GCM. Authentication fails if the password is wrong or the embedded data or extraction file has been altered. Unencrypted files use a SHA-256 checksum to detect corruption.
+
+The extraction file holds the lengths, stealth setting, encryption parameters, and authentication tag or checksum. It contains no password or encryption key. No format header is written into the image.
+
+Keep the output PNG unchanged. Resizing, editing, or converting it to JPEG can destroy the hidden data. Statistical analysis may still detect embedding, including at maximum stealth.

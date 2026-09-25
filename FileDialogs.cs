@@ -27,22 +27,43 @@ namespace Stegano
             {
                 string dialog = type switch
                 {
-                    DialogType.Open => "$dialog = New-Object System.Windows.Forms.OpenFileDialog; $dialog.Title = $env:BBC_DIALOG_TITLE; $dialog.CheckFileExists = $true;",
-                    DialogType.Save => "$dialog = New-Object System.Windows.Forms.SaveFileDialog; $dialog.Title = $env:BBC_DIALOG_TITLE; $dialog.FileName = $env:BBC_DIALOG_NAME; $dialog.OverwritePrompt = $true;",
-                    _ => "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; $dialog.Description = $env:BBC_DIALOG_TITLE;"
+                    DialogType.Open => """
+                        $dialog = New-Object System.Windows.Forms.OpenFileDialog
+                        $dialog.Title = $env:STEGANO_DIALOG_TITLE
+                        $dialog.CheckFileExists = $true
+                        """,
+                    DialogType.Save => """
+                        $dialog = New-Object System.Windows.Forms.SaveFileDialog
+                        $dialog.Title = $env:STEGANO_DIALOG_TITLE
+                        $dialog.FileName = $env:STEGANO_DIALOG_NAME
+                        $dialog.OverwritePrompt = $true
+                        """,
+                    _ => """
+                        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+                        $dialog.Description = $env:STEGANO_DIALOG_TITLE
+                        """
                 };
-                string result = type == DialogType.Folder ? "$dialog.SelectedPath" : "$dialog.FileName";
+                string selectedPath = type == DialogType.Folder ? "$dialog.SelectedPath" : "$dialog.FileName";
                 start = new ProcessStartInfo("powershell.exe");
                 start.ArgumentList.Add("-NoProfile");
                 start.ArgumentList.Add("-STA");
                 start.ArgumentList.Add("-Command");
-                start.ArgumentList.Add("$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding; "
-                    + "Add-Type -AssemblyName System.Windows.Forms; " + dialog
-                    + " try { if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { "
-                    + "[Console]::WriteLine(" + result + ") } } finally { $dialog.Dispose() }");
-                // User-supplied titles and filenames are data, never PowerShell source.
-                start.Environment["BBC_DIALOG_TITLE"] = title;
-                start.Environment["BBC_DIALOG_NAME"] = defaultFileName;
+                start.ArgumentList.Add($$"""
+                    $ErrorActionPreference = 'Stop'
+                    [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding
+                    Add-Type -AssemblyName System.Windows.Forms
+                    {{dialog}}
+                    try {
+                        if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+                            [Console]::WriteLine({{selectedPath}})
+                        }
+                    } finally {
+                        $dialog.Dispose()
+                    }
+                    """);
+                // Environment variables keep quotes in titles and filenames out of the script.
+                start.Environment["STEGANO_DIALOG_TITLE"] = title;
+                start.Environment["STEGANO_DIALOG_NAME"] = defaultFileName;
             }
             else if (OperatingSystem.IsMacOS())
             {
@@ -54,10 +75,16 @@ namespace Stegano
                 };
                 start = new ProcessStartInfo("/usr/bin/osascript");
                 start.ArgumentList.Add("-e");
-                start.ArgumentList.Add("on run argv\ntry\nreturn POSIX path of (" + choose
-                    + ")\non error messageText number errorNumber\n"
-                    + "if errorNumber is -128 then return \"\"\n"
-                    + "error messageText number errorNumber\nend try\nend run");
+                start.ArgumentList.Add($"""
+                    on run argv
+                        try
+                            return POSIX path of ({choose})
+                        on error messageText number errorNumber
+                            if errorNumber is -128 then return ""
+                            error messageText number errorNumber
+                        end try
+                    end run
+                    """);
                 start.ArgumentList.Add("--");
                 start.ArgumentList.Add(title);
                 start.ArgumentList.Add(defaultFileName);

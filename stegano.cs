@@ -41,6 +41,7 @@ namespace Stegano
         // Image payload: UTF-8 filename then file contents, encrypted together if requested.
         // Bits run most-significant first through eligible pixels in row-major R, G, B order.
         internal const int MaxFilenameBytes = 255;
+        private const byte FormatVersion = 4;
         private const int HeaderLength = 44;
         private const int TagLength = 16;
         private const int ChecksumLength = 32;
@@ -53,7 +54,7 @@ namespace Stegano
         {
             ArgumentNullException.ThrowIfNull(fileName);
             GetFilenameByteCount(fileName);
-            long storage = ValidateImage(bitmap, stealth);
+            long storage = GetImageStorageBytes(bitmap, stealth);
             long available = Math.Min(storage, Array.MaxLength) - MaxFilenameBytes;
             return (int)Math.Max(0, available);
         }
@@ -66,7 +67,7 @@ namespace Stegano
         {
             ArgumentNullException.ThrowIfNull(fileName);
             ArgumentNullException.ThrowIfNull(contents);
-            long storage = ValidateImage(source, stealth);
+            long storage = GetImageStorageBytes(source, stealth);
             bool encrypted = !string.IsNullOrEmpty(password);
             int filenameLength = GetFilenameByteCount(fileName);
             long storedLength = (long)filenameLength + contents.Length;
@@ -76,7 +77,7 @@ namespace Stegano
             byte[] extractionFile = new byte[HeaderLength + (encrypted ? TagLength : ChecksumLength)];
             Span<byte> header = extractionFile.AsSpan(0, HeaderLength);
             Span<byte> verification = extractionFile.AsSpan(HeaderLength);
-            header[0] = 4;
+            header[0] = FormatVersion;
             header[1] = encrypted ? (byte)1 : (byte)0;
             header[2] = (byte)stealth;
             BinaryPrimitives.WriteInt32LittleEndian(header[4..], (int)storedLength);
@@ -120,7 +121,7 @@ namespace Stegano
             bool complete = false;
             try
             {
-                WriteBytes(result, payload, stealth);
+                WritePayload(result, payload, stealth);
                 complete = true;
                 return (result, extractionFile);
             }
@@ -137,7 +138,7 @@ namespace Stegano
             if (extractionFile.Length < HeaderLength)
                 throw new SteganoException(SteganoError.InvalidExtractionFile, "Invalid or incomplete extraction file.");
             ReadOnlySpan<byte> header = extractionFile.AsSpan(0, HeaderLength);
-            if (header[0] != 4)
+            if (header[0] != FormatVersion)
                 throw new SteganoException(SteganoError.UnsupportedVersion, "Unsupported extraction file version.");
             if (header[1] > 1 || header[3] != 0)
                 throw new SteganoException(SteganoError.InvalidExtractionFile, "Invalid extraction file flags.");
@@ -145,7 +146,7 @@ namespace Stegano
             var stealth = (Stealthiness)header[2];
             if (!Enum.IsDefined(stealth))
                 throw new SteganoException(SteganoError.InvalidExtractionFile, "Invalid stealth setting.");
-            long storage = ValidateImage(source, stealth);
+            long storage = GetImageStorageBytes(source, stealth);
 
             // Validate unauthenticated parameters before allocating payload memory or deriving a key.
             bool encrypted = header[1] == 1;
@@ -172,7 +173,7 @@ namespace Stegano
                         throw new SteganoException(SteganoError.InvalidExtractionFile, "Unencrypted extraction file contains encryption parameters.");
             }
 
-            byte[] payload = ReadBytes(source, storedLength, stealth);
+            byte[] payload = ReadPayload(source, storedLength, stealth);
             byte[] plaintext;
             if (encrypted)
             {
@@ -240,7 +241,7 @@ namespace Stegano
             return hash.GetHashAndReset();
         }
 
-        private static long ValidateImage(SKBitmap bitmap, Stealthiness stealth)
+        private static long GetImageStorageBytes(SKBitmap bitmap, Stealthiness stealth)
         {
             ArgumentNullException.ThrowIfNull(bitmap);
             if (!Enum.IsDefined(stealth))
@@ -285,7 +286,7 @@ namespace Stegano
         private static int MaskedColour(SKColor pixel, int mask) =>
             ((pixel.Red & mask) << 16) | ((pixel.Green & mask) << 8) | (pixel.Blue & mask);
 
-        private static byte[] ReadBytes(SKBitmap bitmap, int length, Stealthiness stealth)
+        private static byte[] ReadPayload(SKBitmap bitmap, int length, Stealthiness stealth)
         {
             byte[] bytes = new byte[length];
             long end = (long)length * 8;
@@ -306,7 +307,7 @@ namespace Stegano
             throw new SteganoException(SteganoError.CorruptedData, "Image has too few eligible pixels for the payload.");
         }
 
-        private static void WriteBytes(SKBitmap bitmap, ReadOnlySpan<byte> bytes, Stealthiness stealth)
+        private static void WritePayload(SKBitmap bitmap, ReadOnlySpan<byte> bytes, Stealthiness stealth)
         {
             long end = (long)bytes.Length * 8;
             long bit = 0;

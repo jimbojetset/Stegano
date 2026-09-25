@@ -1,4 +1,5 @@
 using SkiaSharp;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 
 namespace Stegano;
@@ -37,9 +38,13 @@ Passwords are optional. Stealth defaults to Maximum. Linux requires zenity.
             switch (command.Trim().ToLowerInvariant())
             {
                 case "e":
-                case "embed": Embed(); break;
+                case "embed":
+                    Embed();
+                    break;
                 case "x":
-                case "extract": Extract(); break;
+                case "extract":
+                    Extract();
+                    break;
                 default:
                     Console.Error.WriteLine("Specify embed or extract, or --help.");
                     return 1;
@@ -64,12 +69,18 @@ Passwords are optional. Stealth defaults to Maximum. Linux requires zenity.
         if (stealth is null) return;
         int capacity = Stegano.GetCapacity(source, "", stealth.Value);
         Console.WriteLine($"Maximum file size to be embedded: {capacity:N0} bytes");
-        string? inputPath = FileDialogs.OpenFile("Select the file to hide");
-        if (Cancelled(inputPath)) return;
-        string name = Path.GetFileName(inputPath!);
-        capacity = Stegano.GetCapacity(source, name, stealth.Value);
-        if (new FileInfo(inputPath!).Length > capacity)
-            throw new InvalidOperationException("The file exceeds this image's capacity at the selected stealth setting.");
+        string? inputPath;
+        string fileName;
+        while (true)
+        {
+            inputPath = FileDialogs.OpenFile("Select the file to hide");
+            if (Cancelled(inputPath)) return;
+            fileName = Path.GetFileName(inputPath);
+            capacity = Stegano.GetCapacity(source, fileName, stealth.Value);
+            if (new FileInfo(inputPath).Length <= capacity)
+                break;
+            Console.WriteLine("The file exceeds this image's capacity at the selected stealth setting. Please select a different file.");
+        }
 
         string? password = ReadPassword();
         if (password is null) return;
@@ -87,16 +98,16 @@ Passwords are optional. Stealth defaults to Maximum. Linux requires zenity.
             throw new ArgumentException("Choose a filename ending in .png to preserve the embedded pixels.");
         string? extractionPath = FileDialogs.SaveFile("Save the separate extraction file", "extraction.bin");
         if (Cancelled(extractionPath)) return;
-        RequireDifferentPaths(outputPath!, imagePath!, inputPath!);
-        RequireDifferentPaths(extractionPath!, imagePath!, inputPath!, outputPath!);
+        RequireDifferentPaths(outputPath, imagePath, inputPath);
+        RequireDifferentPaths(extractionPath, imagePath, inputPath, outputPath);
 
-        var result = Stegano.Embed(source, name, File.ReadAllBytes(inputPath!), password, stealth.Value);
+        var result = Stegano.Embed(source, fileName, File.ReadAllBytes(inputPath), password, stealth.Value);
         using SKBitmap bitmap = result.Bitmap;
         using SKData png = bitmap.Encode(SKEncodedImageFormat.Png, 100)
             ?? throw new InvalidOperationException("Could not encode the output image as PNG.");
-        File.WriteAllBytes(extractionPath!, result.ExtractionFile);
+        File.WriteAllBytes(extractionPath, result.ExtractionFile);
         Console.WriteLine($"Extraction file saved: {extractionPath}");
-        using (FileStream output = File.Create(outputPath!))
+        using (FileStream output = File.Create(outputPath))
             png.SaveTo(output);
         Console.WriteLine($"Image saved: {outputPath}");
     }
@@ -111,20 +122,20 @@ Passwords are optional. Stealth defaults to Maximum. Linux requires zenity.
         if (password is null) return;
         using SKBitmap image = SKBitmap.Decode(imagePath)
             ?? throw new InvalidDataException("The selected image could not be decoded.");
-        EmbeddedFile file = Stegano.Extract(image, File.ReadAllBytes(extractionPath!), password);
-        string name = Path.GetFileName(file.FileName.Replace('\\', '/'));
+        EmbeddedFile file = Stegano.Extract(image, File.ReadAllBytes(extractionPath), password);
+        string fileName = Path.GetFileName(file.FileName.Replace('\\', '/'));
         foreach (char c in Path.GetInvalidFileNameChars())
-            name = name.Replace(c, '_');
-        if (string.IsNullOrWhiteSpace(name) || name is "." or "..")
-            name = "recovered.bin";
-        string? outputPath = FileDialogs.SaveFile("Save the recovered file", name);
+            fileName = fileName.Replace(c, '_');
+        if (string.IsNullOrWhiteSpace(fileName) || fileName is "." or "..")
+            fileName = "recovered.bin";
+        string? outputPath = FileDialogs.SaveFile("Save the recovered file", fileName);
         if (Cancelled(outputPath)) return;
-        RequireDifferentPaths(outputPath!, imagePath!, extractionPath!);
-        File.WriteAllBytes(outputPath!, file.Contents);
+        RequireDifferentPaths(outputPath, imagePath, extractionPath);
+        File.WriteAllBytes(outputPath, file.Contents);
         Console.WriteLine($"Recovered file saved: {outputPath}");
     }
 
-    private static bool Cancelled(string? path)
+    private static bool Cancelled([NotNullWhen(false)] string? path)
     {
         if (path is not null) return false;
         Console.WriteLine("Cancelled.");
@@ -135,8 +146,9 @@ Passwords are optional. Stealth defaults to Maximum. Linux requires zenity.
     {
         StringComparison comparison = OperatingSystem.IsLinux()
             ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        string outputPath = Path.GetFullPath(output);
         foreach (string input in inputs)
-            if (string.Equals(Path.GetFullPath(output), Path.GetFullPath(input), comparison))
+            if (string.Equals(outputPath, Path.GetFullPath(input), comparison))
                 throw new ArgumentException("Choose separate output files without replacing an input file.");
     }
 
