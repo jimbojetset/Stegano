@@ -40,19 +40,21 @@ namespace Stegano
         // followed by a GCM tag (16) or SHA-256 checksum (32). None of this is written to the image.
         // Image payload: UTF-8 filename then file contents, encrypted together if requested.
         // Bits run most-significant first through eligible pixels in row-major R, G, B order.
+        internal const int MaxFilenameBytes = 255;
         private const int HeaderLength = 44;
         private const int TagLength = 16;
         private const int ChecksumLength = 32;
         private const int Iterations = 600_000;
         private static readonly UTF8Encoding Utf8 = new(false, true);
 
-        // Maximum file contents in bytes, after the UTF-8 filename. Encryption adds no
-        // image overhead. Embed still checks whether the filename itself fits.
+        // Reserve the full filename allowance even when the actual UTF-8 name is shorter.
+        // The unused allowance is not written into the image.
         public static int GetCapacity(SKBitmap bitmap, string fileName, Stealthiness stealth = Stealthiness.Maximum)
         {
             ArgumentNullException.ThrowIfNull(fileName);
+            GetFilenameByteCount(fileName);
             long storage = ValidateImage(bitmap, stealth);
-            long available = Math.Min(storage, Array.MaxLength) - Utf8.GetByteCount(fileName);
+            long available = Math.Min(storage, Array.MaxLength) - MaxFilenameBytes;
             return (int)Math.Max(0, available);
         }
 
@@ -66,10 +68,10 @@ namespace Stegano
             ArgumentNullException.ThrowIfNull(contents);
             long storage = ValidateImage(source, stealth);
             bool encrypted = !string.IsNullOrEmpty(password);
-            int filenameLength = Utf8.GetByteCount(fileName);
+            int filenameLength = GetFilenameByteCount(fileName);
             long storedLength = (long)filenameLength + contents.Length;
-            if (storedLength > Array.MaxLength || storedLength > storage)
-                throw new SteganoException(SteganoError.InsufficientCapacity, "Image is too small for this file and its filename.");
+            if ((long)MaxFilenameBytes + contents.Length > Math.Min(storage, Array.MaxLength))
+                throw new SteganoException(SteganoError.InsufficientCapacity, "Image is too small for this file and the reserved filename space.");
 
             byte[] extractionFile = new byte[HeaderLength + (encrypted ? TagLength : ChecksumLength)];
             Span<byte> header = extractionFile.AsSpan(0, HeaderLength);
@@ -154,7 +156,7 @@ namespace Stegano
             int storedLength = BinaryPrimitives.ReadInt32LittleEndian(header[4..]);
             int filenameLength = BinaryPrimitives.ReadInt32LittleEndian(header[40..]);
             if (storedLength < 0 || storedLength > Array.MaxLength || storedLength > storage
-                || filenameLength < 0 || filenameLength > storedLength)
+                || filenameLength < 0 || filenameLength > MaxFilenameBytes || filenameLength > storedLength)
                 throw new SteganoException(SteganoError.InvalidExtractionFile, "Invalid payload length or insufficient image capacity.");
             if (encrypted)
             {
@@ -217,6 +219,14 @@ namespace Stegano
             {
                 CryptographicOperations.ZeroMemory(plaintext);
             }
+        }
+
+        private static int GetFilenameByteCount(string fileName)
+        {
+            int length = Utf8.GetByteCount(fileName);
+            if (length > MaxFilenameBytes)
+                throw new ArgumentException($"The filename, including its extension, must not exceed {MaxFilenameBytes} UTF-8 bytes.", nameof(fileName));
+            return length;
         }
 
         private static byte[] DeriveKey(string password, ReadOnlySpan<byte> header) =>

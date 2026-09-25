@@ -58,10 +58,19 @@ Passwords are optional. Stealth defaults to Maximum. Linux requires zenity.
     {
         string? imagePath = FileDialogs.OpenFile("Select the source image");
         if (Cancelled(imagePath)) return;
-        string? inputPath = FileDialogs.OpenFile("Select the file to hide");
-        if (Cancelled(inputPath)) return;
         using SKBitmap source = SKBitmap.Decode(imagePath)
             ?? throw new InvalidDataException("The selected image could not be decoded.");
+        Stegano.Stealthiness? stealth = ReadStealth();
+        if (stealth is null) return;
+        int capacity = Stegano.GetCapacity(source, "", stealth.Value);
+        Console.WriteLine($"Maximum file size to be embedded: {capacity:N0} bytes");
+        string? inputPath = FileDialogs.OpenFile("Select the file to hide");
+        if (Cancelled(inputPath)) return;
+        string name = Path.GetFileName(inputPath!);
+        capacity = Stegano.GetCapacity(source, name, stealth.Value);
+        if (new FileInfo(inputPath!).Length > capacity)
+            throw new InvalidOperationException("The file exceeds this image's capacity at the selected stealth setting.");
+
         string? password = ReadPassword();
         if (password is null) return;
         if (password.Length > 0)
@@ -71,13 +80,6 @@ Passwords are optional. Stealth defaults to Maximum. Linux requires zenity.
             if (password != confirmation)
                 throw new ArgumentException("Passwords do not match.");
         }
-        Stegano.Stealthiness? stealth = ReadStealth();
-        if (stealth is null) return;
-        string name = Path.GetFileName(inputPath!);
-        int capacity = Stegano.GetCapacity(source, name, stealth.Value);
-        Console.WriteLine($"Available file capacity: {capacity:N0} bytes.");
-        if (new FileInfo(inputPath!).Length > capacity)
-            throw new InvalidOperationException("The file exceeds this image's capacity at the selected stealth setting.");
 
         string? outputPath = FileDialogs.SaveFile("Save the embedded image as PNG", "embedded.png");
         if (Cancelled(outputPath)) return;
